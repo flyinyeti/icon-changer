@@ -1,11 +1,18 @@
-iimport os
+import os
 import sys
-import ctypes
 import shutil
+import ctypes
 import win32com.client
 
-from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtWidgets import QFileDialog, QMessageBox, QTabWidget, QLabel, QPushButton, QListWidget
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QLabel, QPushButton,
+    QVBoxLayout, QFileDialog, QListWidget, QHBoxLayout, QMessageBox
+)
+from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtCore import Qt
+
+DESKTOP = os.path.join(os.environ["USERPROFILE"], "Desktop")
+ICONS_DIR = os.path.join(os.getcwd(), "icons")
 
 def get_shortcuts(folder):
     try:
@@ -19,103 +26,74 @@ def change_icon(shortcut_path, icon_path):
     shortcut.IconLocation = icon_path
     shortcut.Save()
 
-class IconChanger(QtWidgets.QWidget):
+class IconChanger(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Icon Changer")
-        self.setGeometry(100, 100, 600, 400)
-        self.setAcceptDrops(True)
-
-        self.tabs = QTabWidget()
-        self.tab_main = QtWidgets.QWidget()
-        self.tab_download = QtWidgets.QWidget()
-        self.tabs.addTab(self.tab_main, "Change Icons")
-        self.tabs.addTab(self.tab_download, "Download Icons")
-
-        self.icon_folder = ''
-        self.shortcut_folder = ''
-
-        self.setup_main_tab()
-        self.setup_download_tab()
-
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(self.tabs)
-        self.setLayout(layout)
-
-    def setup_main_tab(self):
-        layout = QtWidgets.QVBoxLayout()
+        self.setWindowTitle("Windows Icon Changer + Icons")
+        self.setGeometry(100, 100, 400, 500)
 
         self.shortcut_list = QListWidget()
+        self.shortcut_list.addItems(get_shortcuts(DESKTOP))
+
         self.icon_list = QListWidget()
+        self.icon_list.addItems([f for f in os.listdir(ICONS_DIR) if f.endswith(".ico")])
+        self.icon_list.setFixedHeight(120)
 
-        browse_shortcuts = QPushButton("Choose Shortcut Folder")
-        browse_shortcuts.clicked.connect(self.select_shortcut_folder)
+        self.preview_label = QLabel("Preview will appear here")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setFixedHeight(100)
 
-        browse_icons = QPushButton("Choose Icon Folder")
-        browse_icons.clicked.connect(self.select_icon_folder)
+        choose_button = QPushButton("Choose .ico File")
+        choose_button.clicked.connect(self.choose_icon)
 
-        apply_button = QPushButton("Apply Selected Icon to All Shortcuts")
-        apply_button.clicked.connect(self.apply_icon_to_all_shortcuts)
+        self.tint_button = QPushButton("Tint Icon")
+        self.tint_button.setEnabled(False)
 
-        layout.addWidget(browse_shortcuts)
+        apply_button = QPushButton("Apply Icon to Shortcut")
+        apply_button.clicked.connect(self.apply_icon)
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Select a shortcut:"))
         layout.addWidget(self.shortcut_list)
-        layout.addWidget(browse_icons)
+        layout.addWidget(QLabel("Select an icon from folder:"))
         layout.addWidget(self.icon_list)
+        layout.addWidget(self.preview_label)
+        layout.addWidget(choose_button)
+        layout.addWidget(self.tint_button)
         layout.addWidget(apply_button)
+        self.setLayout(layout)
 
-        self.tab_main.setLayout(layout)
+        self.icon_list.currentItemChanged.connect(self.show_preview)
+        self.selected_icon_path = ""
 
-    def setup_download_tab(self):
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(QLabel("Online downloader coming soon..."))
-        self.tab_download.setLayout(layout)
+    def choose_icon(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose Icon", "", "Icon Files (*.ico)")
+        if path:
+            self.selected_icon_path = path
+            self.show_icon(path)
 
-    def select_shortcut_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Shortcut Folder")
-        if folder:
-            self.shortcut_folder = folder
-            self.shortcut_list.clear()
-            for file in get_shortcuts(folder):
-                self.shortcut_list.addItem(file)
+    def show_preview(self):
+        item = self.icon_list.currentItem()
+        if item:
+            icon_path = os.path.join(ICONS_DIR, item.text())
+            self.selected_icon_path = icon_path
+            self.show_icon(icon_path)
 
-    def select_icon_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Icon Folder")
-        if folder:
-            self.icon_folder = folder
-            self.icon_list.clear()
-            for file in os.listdir(folder):
-                if file.endswith(".ico"):
-                    self.icon_list.addItem(file)
+    def show_icon(self, path):
+        pixmap = QPixmap(path)
+        self.preview_label.setPixmap(pixmap.scaled(64, 64, Qt.KeepAspectRatio))
 
-    def apply_icon_to_all_shortcuts(self):
-        icon_item = self.icon_list.currentItem()
-        if not icon_item:
-            QMessageBox.warning(self, "No Icon Selected", "Please select an icon to apply.")
+    def apply_icon(self):
+        item = self.shortcut_list.currentItem()
+        if not item or not self.selected_icon_path:
+            QMessageBox.warning(self, "Error", "Please select both a shortcut and an icon.")
             return
+        shortcut_path = os.path.join(DESKTOP, item.text())
+        change_icon(shortcut_path, self.selected_icon_path)
+        QMessageBox.information(self, "Success", "Icon applied successfully.")
 
-        icon_path = os.path.join(self.icon_folder, icon_item.text())
-        for i in range(self.shortcut_list.count()):
-            shortcut_path = os.path.join(self.shortcut_folder, self.shortcut_list.item(i).text())
-            change_icon(shortcut_path, icon_path)
-
-        QMessageBox.information(self, "Success", "Icons updated.")
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if path.endswith(".ico") and os.path.isfile(path):
-                dest = os.path.join(os.getcwd(), "icons", os.path.basename(path))
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                shutil.copy(path, dest)
-                self.icon_list.addItem(os.path.basename(dest))
-
-if __name__ == '__main__':
-    app = QtWidgets.QApplication(sys.argv)
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
     window = IconChanger()
     window.show()
     sys.exit(app.exec_())
-
